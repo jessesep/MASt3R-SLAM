@@ -435,7 +435,7 @@ def run_visualization(cfg, states, keyframes, main2viz, viz2main) -> None:
         # Always bind the window framebuffer before calling render
         window.use()
 
-        window.render(current_time, delta)
+        window_config.render(current_time, delta)
         if not window.is_closing:
             window.swap_buffers()
 

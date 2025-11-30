@@ -1,5 +1,6 @@
 inherit: "config/base.yaml"
 
 use_calib: True
+single_thread: True  # Required for WSL to avoid CUDA multiprocessing issues
 dataset:
   subsample: 2

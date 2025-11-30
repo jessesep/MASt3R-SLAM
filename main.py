@@ -247,6 +247,12 @@ if __name__ == "__main__":
             states.unpause()
 
         if i == len(dataset):
+            # Dataset processing complete - wait for user to close window
+            print("Dataset processing complete. Visualization will remain open until you close the window.")
+            while not last_msg.is_terminated:
+                msg = try_get_msg(viz2main)
+                last_msg = msg if msg is not None else last_msg
+                time.sleep(0.1)
             states.set_mode(Mode.TERMINATED)
             break
 
