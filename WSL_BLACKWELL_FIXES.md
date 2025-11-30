@@ -341,18 +341,6 @@ pip install --no-build-isolation -e thirdparty/lietorch
 single_thread: True
 ```
 
-### GUI widgets not interactive (WSL2) (✅ RESOLVED)
-**Issue**: GUI window opens and displays correctly, but sliders, checkboxes, and buttons don't respond to mouse clicks
-
-**Root Cause**: On WSL2/WSLg, the viewport's `image_button` was consuming mouse events before ImGui could route them to GUI widgets
-
-**Solution**: Added `want_capture_mouse` check in viewport input handling
-- **File**: `thirdparty/in3d/in3d/viewport_window.py:78-86`
-- Viewport now skips input processing when ImGui wants to capture mouse/keyboard
-- This allows GUI widgets to receive mouse events properly on WSL2
-
-**Status**: Fixed in this branch. GUI controls should now be fully interactive on WSL2.
-
 ---
 
 ## Contributors
