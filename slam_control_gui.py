@@ -245,9 +245,14 @@ class SLAMControlGUI:
             btn = tk.Button(
                 self.dynamic_frame,
                 text=ds,
-                command=lambda d=ds: self.dataset_path.insert(0, f"datasets/tum/{d}/")
+                command=lambda d=ds: self.select_dataset(d)
             )
             btn.pack(fill=tk.X, pady=2)
+
+    def select_dataset(self, dataset_name):
+        """Helper to select a dataset (clears field first)"""
+        self.dataset_path.delete(0, tk.END)
+        self.dataset_path.insert(0, f"datasets/tum/{dataset_name}/")
 
     def build_video_options(self):
         """Build video file selection UI"""
