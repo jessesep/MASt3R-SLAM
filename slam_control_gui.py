@@ -45,6 +45,9 @@ class SLAMControlGUI:
         self.keyframes_var = tk.StringVar(value="Keyframes: 0")
         self.pid_var = tk.StringVar(value="PID: None")
 
+        # Options
+        self.disable_viz = tk.BooleanVar(value=True)  # Default to True for WSL2
+
         self.create_ui()
 
         # Start status update thread
@@ -123,6 +126,18 @@ class SLAMControlGUI:
 
         # Build NDI options by default
         self.build_ndi_options()
+
+        # Options section
+        options_frame = tk.Frame(source_frame)
+        options_frame.pack(fill=tk.X, pady=5)
+
+        self.viz_checkbox = tk.Checkbutton(
+            options_frame,
+            text="Disable Visualization (recommended for WSL2)",
+            variable=self.disable_viz,
+            font=("Arial", 9)
+        )
+        self.viz_checkbox.pack(anchor=tk.W)
 
         # Launch button
         self.launch_btn = tk.Button(
@@ -478,6 +493,10 @@ class SLAMControlGUI:
 
         else:
             return None
+
+        # Add --no-viz flag if checkbox is checked
+        if self.disable_viz.get():
+            cmd += " --no-viz"
 
         return ["bash", "-c", cmd]
 
