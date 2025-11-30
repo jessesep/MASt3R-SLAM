@@ -76,6 +76,15 @@ class ViewportWindow:
         return int(x - wx), int(wy - y)
 
     def handle_io(self, has_focus):
+        # WSL2 fix: Don't process input if ImGui wants to capture mouse/keyboard
+        io = imgui.get_io()
+        if io.want_capture_mouse or io.want_capture_keyboard:
+            # Reset mouse state to prevent viewport from keeping control
+            self.mouse_left_down = False
+            self.mouse_right_down = False
+            self.has_focus_on_click = False
+            return
+
         clicked = imgui.is_mouse_clicked(0) or imgui.is_mouse_clicked(1)
         released = imgui.is_mouse_released(0) or imgui.is_mouse_released(1)
         if clicked and has_focus:
@@ -86,8 +95,8 @@ class ViewportWindow:
         if self.camera is None:
             return
 
-        left, right = imgui.get_io().mouse_down[0], imgui.get_io().mouse_down[1]
-        scroll = imgui.get_io().mouse_wheel * has_focus
+        left, right = io.mouse_down[0], io.mouse_down[1]
+        scroll = io.mouse_wheel * has_focus
 
         # we want to keep tracking if the drag goes out of focus,
         self.mouse_left_down = (has_focus or self.mouse_left_down) and left
