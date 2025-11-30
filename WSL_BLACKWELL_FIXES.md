@@ -277,10 +277,14 @@ mast3r_slam_backends loaded: True
 
 ## Known Issues and Limitations
 
-### WSL2 Multiprocessing (RESOLVED)
+### WSL2 Multiprocessing (✅ RESOLVED)
 - **Issue**: CUDA resource handle errors when using multiprocessing on WSL2
-- **Solution**: Use `single_thread: True` in config
-- **Trade-off**: Slightly reduced performance (~12 FPS vs ~18 FPS), but system is fully functional
+- **Solution**: Applied Windows branch fix - removed separate backend process entirely
+  - Backend now runs inline in main thread (not `mp.Process`)
+  - No CUDA tensor sharing between processes = no resource handle errors
+  - Enabled by default in this branch
+- **Trade-off**: Performance reduced to ~9 FPS on WSL (vs ~18 FPS native Linux)
+- **Result**: **KEYFRAMES AND VISUALIZATION FULLY WORKING ON WSL!**
 
 ### GPU Architecture Requirements
 - Requires CUDA 12.1+ for Blackwell support
@@ -296,10 +300,11 @@ mast3r_slam_backends loaded: True
 
 Tested on RTX 5090 with TUM FR1 Desk dataset:
 
-| Mode | FPS | Notes |
-|------|-----|-------|
-| Multi-threaded (Native Linux) | ~18 FPS | Full performance |
-| Single-threaded (WSL2) | ~12 FPS | Required for WSL2 stability |
+| Mode | FPS | Keyframes | Notes |
+|------|-----|-----------|-------|
+| Multi-threaded (Native Linux) | ~18 FPS | ✅ | Full performance |
+| Windows branch fix (WSL2) | ~9 FPS | ✅ | **FULLY FUNCTIONAL - Recommended for WSL** |
+| Config single_thread only | ~12 FPS | ❌ | Backend still separate process - doesn't work on WSL |
 
 ---
 
