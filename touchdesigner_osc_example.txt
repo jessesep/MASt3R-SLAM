@@ -1,0 +1,109 @@
+# TouchDesigner OSC Point Cloud Receiver Example
+# Save this as a reference for building your TD network
+
+## Network Layout:
+
+1. OSC In DAT
+   - Port: 9001
+   - All Messages: ON
+
+2. Execute DAT (attached to OSC In DAT)
+   - Code:
+
+```python
+def onReceiveOSC(dat, rowIndex, message, bytes):
+    """Parse incoming OSC messages from MASt3R-SLAM"""
+    address = message[0]
+    args = message[2:]
+
+    if address == '/slam/cloud/start':
+        num_points = int(args[0])
+        op('status_text').par.text = f"Receiving {num_points} points..."
+        op('point_table').clear()
+
+    elif address == '/slam/cloud/batch':
+        # Each point: [x, y, z, r, g, b, confidence]
+        for i in range(0, len(args), 7):
+            if i+6 < len(args):
+                x, y, z = args[i], args[i+1], args[i+2]
+                r, g, b = args[i+3], args[i+4], args[i+5]
+                conf = args[i+6]
+
+                # Add row to table
+                op('point_table').appendRow([x, y, z, r, g, b, conf])
+
+    elif address == '/slam/cloud/end':
+        num_points = op('point_table').numRows
+        op('status_text').par.text = f"Point cloud complete: {num_points} points"
+
+    elif address == '/slam/camera/position':
+        x, y, z = args
+        op('camera_pos').par.tx = x
+        op('camera_pos').par.ty = y
+        op('camera_pos').par.tz = z
+
+    elif address == '/slam/status/fps':
+        fps = args[0]
+        op('fps_text').par.text = f"SLAM FPS: {fps:.1f}"
+```
+
+3. Table DAT (name: 'point_table')
+   - Stores incoming point cloud data
+
+4. DAT to SOP
+   - Reference: point_table
+   - Creates 3D geometry from table
+
+5. Geometry COMP
+   - Displays the point cloud
+
+6. Text TOPs (for status display)
+   - status_text: Shows point count
+   - fps_text: Shows SLAM FPS
+
+## Simple Test Setup:
+
+### Minimal Network:
+```
+[OSC In DAT] → [Info DAT] (view incoming messages)
+```
+
+### Full Visualization:
+```
+[OSC In DAT] → [Execute DAT] → [Table DAT] → [DAT to SOP] → [Geometry COMP]
+```
+
+## OSC Message Reference:
+
+Point Cloud:
+- /slam/cloud/start [num_points]
+- /slam/cloud/batch [x1,y1,z1,r1,g1,b1,c1, x2,y2,z2,...]
+- /slam/cloud/end []
+
+Camera:
+- /slam/camera/position [x, y, z]
+- /slam/camera/rotation [9 values, row-major matrix]
+- /slam/camera/quaternion [w, x, y, z]
+
+Status:
+- /slam/status/fps [fps]
+- /slam/status/keyframes [count]
+- /slam/status/points [count]
+
+## Tips:
+
+1. Start with just OSC In + Info DAT to see raw messages
+2. Add Execute DAT parsing one message type at a time
+3. Use Text TOPs to debug - show point counts, FPS, etc.
+4. Point cloud can be LARGE - use downsampling (--osc-downsample 20)
+5. Add Noise TOP / Transform SOP to manipulate point cloud
+6. Create feedback loop: Point cloud → Transform → NDI Out → SLAM → ...
+
+## Performance:
+
+- Typical: ~1000-5000 points per frame (with downsample=10)
+- OSC messages arrive in batches (~100 points/message)
+- Update rate: matches SLAM FPS (~9-18 FPS)
+- TouchDesigner can handle this easily at 60 FPS cook rate
+
+Enjoy!
