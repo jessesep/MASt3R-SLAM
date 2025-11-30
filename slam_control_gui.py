@@ -47,6 +47,7 @@ class SLAMControlGUI:
 
         # Options
         self.disable_viz = tk.BooleanVar(value=True)  # Default to True for WSL2
+        self.save_ply = tk.BooleanVar(value=True)  # Default to True - save results
 
         self.create_ui()
 
@@ -138,6 +139,14 @@ class SLAMControlGUI:
             font=("Arial", 9)
         )
         self.viz_checkbox.pack(anchor=tk.W)
+
+        self.ply_checkbox = tk.Checkbutton(
+            options_frame,
+            text="Save PLY on exit (for Gaussian Splatting)",
+            variable=self.save_ply,
+            font=("Arial", 9)
+        )
+        self.ply_checkbox.pack(anchor=tk.W)
 
         # Launch button
         self.launch_btn = tk.Button(
@@ -497,6 +506,10 @@ class SLAMControlGUI:
         # Add --no-viz flag if checkbox is checked
         if self.disable_viz.get():
             cmd += " --no-viz"
+
+        # Add --save-ply flag if checkbox is checked
+        if self.save_ply.get():
+            cmd += " --save-ply"
 
         return ["bash", "-c", cmd]
 

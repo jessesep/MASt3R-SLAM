@@ -40,7 +40,6 @@ from mast3r_slam.file_watcher import ImageFolderWatcher, ImageSequenceDataset
 from mast3r_slam.osc_streamer import OSCStreamer
 from mast3r_slam.command_listener import CommandListener, CommandHandler
 from mast3r_slam.dataloader import load_dataset
-from mast3r_slam.slam import SLAM
 from mast3r_slam.mast3r_utils import get_mast3r_model_from_cfg
 import torch
 import numpy as np

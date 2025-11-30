@@ -4,20 +4,37 @@
 
 1. Visit: https://ndi.tv/sdk/
 2. Select "NDI SDK for Linux"
-3. Download the .tar.gz file
+3. Download the .tar.gz file (Install_NDI_SDK_v6_Linux.tar.gz)
 
 ## Install on WSL2
 
 ```bash
-# Extract the downloaded file (replace with actual filename)
-cd ~/Downloads
-tar -xzf Install_NDI_SDK_v6_Linux.tar.gz
+# Extract the installer
+cd /tmp
+wget -O ndi_sdk.tar.gz "https://downloads.ndi.tv/SDK/NDI_SDK_Linux/Install_NDI_SDK_v6_Linux.tar.gz"
+tar -xzf ndi_sdk.tar.gz
 
-# Run the installer
-cd NDI\ SDK\ for\ Linux/
-sudo ./ndi-sdk-install
+# Run the installer (interactive - requires accepting EULA)
+cd /tmp
+chmod +x Install_NDI_SDK_v6_Linux.sh
+sudo ./Install_NDI_SDK_v6_Linux.sh
 
-# This will install to /usr/local/lib
+# Follow prompts:
+# 1. Read EULA (press space to scroll, 'q' to quit reading)
+# 2. Type 'y' to accept
+# 3. Installation completes to /usr/local/lib
+```
+
+## Verify Installation
+
+```bash
+# Check if NDI libraries are installed
+ls -la /usr/local/lib | grep ndi
+ls -la /usr/local/include | grep -i ndi
+
+# Should see files like:
+# - libndi.so.6
+# - Processing.NDI.Lib.h
 ```
 
 ## Install Python NDI
