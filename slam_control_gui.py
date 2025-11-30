@@ -473,7 +473,7 @@ class SLAMControlGUI:
                 messagebox.showerror("Error", "Please specify video file")
                 return None
 
-            cmd = base_cmd[2] + f"python main_live.py --source rtsp --rtsp-url \"{video_path}\" --config config/calib.yaml"
+            cmd = base_cmd[2] + f"python main.py --dataset \"{video_path}\" --config config/calib.yaml"
             self.source_var.set(f"Source: Video ({Path(video_path).name})")
 
         else:
