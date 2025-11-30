@@ -2,46 +2,54 @@
 """
 MASt3R-SLAM Control GUI
 -----------------------
-Separate control panel for switching camera sources on the fly.
+Process launcher and control panel for MASt3R-SLAM.
 Works on WSL2 where ImGui input doesn't work!
 
 Features:
+- Launch MASt3R-SLAM with different camera sources
 - Switch between camera sources (NDI, Webcam, Files, Datasets)
-- Control SLAM parameters
-- Monitor FPS and status
+- Start/Stop/Restart SLAM processes
+- Monitor FPS and status from process output
 - Select NDI sources from dropdown
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, scrolledtext
 import threading
 import queue
 import time
 import json
 import socket
+import subprocess
+import signal
+import os
+import re
 from pathlib import Path
 
 
 class SLAMControlGUI:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("MASt3R-SLAM Control Panel")
-        self.root.geometry("600x800")
+        self.root.title("MASt3R-SLAM Process Launcher")
+        self.root.geometry("800x900")
 
-        # Command queue for SLAM process
-        self.command_queue = queue.Queue()
+        # Process management
+        self.slam_process = None
+        self.process_lock = threading.Lock()
+        self.output_queue = queue.Queue()
 
         # Status variables
-        self.status_var = tk.StringVar(value="Ready")
+        self.status_var = tk.StringVar(value="No process running")
         self.fps_var = tk.StringVar(value="FPS: 0.0")
         self.source_var = tk.StringVar(value="No source")
         self.keyframes_var = tk.StringVar(value="Keyframes: 0")
+        self.pid_var = tk.StringVar(value="PID: None")
 
         self.create_ui()
 
         # Start status update thread
         self.running = True
-        self.status_thread = threading.Thread(target=self.update_status, daemon=True)
+        self.status_thread = threading.Thread(target=self.monitor_process_output, daemon=True)
         self.status_thread.start()
 
     def create_ui(self):
@@ -61,13 +69,36 @@ class SLAMControlGUI:
         title.pack(pady=15)
 
         # ===== STATUS PANEL =====
-        status_frame = tk.LabelFrame(self.root, text="Status", padx=10, pady=10)
+        status_frame = tk.LabelFrame(self.root, text="Process Status", padx=10, pady=10)
         status_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        tk.Label(status_frame, textvariable=self.status_var, font=("Arial", 10)).pack(anchor=tk.W)
+        tk.Label(status_frame, textvariable=self.status_var, font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        tk.Label(status_frame, textvariable=self.pid_var, font=("Arial", 9)).pack(anchor=tk.W)
         tk.Label(status_frame, textvariable=self.fps_var, font=("Arial", 10)).pack(anchor=tk.W)
         tk.Label(status_frame, textvariable=self.source_var, font=("Arial", 10)).pack(anchor=tk.W)
         tk.Label(status_frame, textvariable=self.keyframes_var, font=("Arial", 10)).pack(anchor=tk.W)
+
+        # Process control buttons
+        process_btn_frame = tk.Frame(status_frame)
+        process_btn_frame.pack(fill=tk.X, pady=(10, 0))
+
+        self.stop_btn = tk.Button(
+            process_btn_frame,
+            text="⏹️ Stop Process",
+            command=self.stop_process,
+            bg="#e74c3c",
+            fg="white",
+            state=tk.DISABLED
+        )
+        self.stop_btn.pack(side=tk.LEFT, padx=5)
+
+        self.restart_btn = tk.Button(
+            process_btn_frame,
+            text="🔄 Restart",
+            command=self.restart_process,
+            state=tk.DISABLED
+        )
+        self.restart_btn.pack(side=tk.LEFT, padx=5)
 
         # ===== SOURCE SELECTION =====
         source_frame = tk.LabelFrame(self.root, text="Camera Source", padx=10, pady=10)
@@ -93,98 +124,38 @@ class SLAMControlGUI:
         # Build NDI options by default
         self.build_ndi_options()
 
-        # Apply button
-        apply_btn = tk.Button(
+        # Launch button
+        self.launch_btn = tk.Button(
             source_frame,
-            text="🎬 Apply Source",
+            text="🚀 Launch SLAM",
             command=self.apply_source,
             bg="#27ae60",
             fg="white",
             font=("Arial", 12, "bold"),
             height=2
         )
-        apply_btn.pack(fill=tk.X, pady=10)
+        self.launch_btn.pack(fill=tk.X, pady=10)
 
-        # ===== SLAM CONTROLS =====
-        control_frame = tk.LabelFrame(self.root, text="SLAM Controls", padx=10, pady=10)
-        control_frame.pack(fill=tk.X, padx=10, pady=10)
+        # ===== CONSOLE OUTPUT =====
+        console_frame = tk.LabelFrame(self.root, text="SLAM Console Output", padx=10, pady=10)
+        console_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        btn_frame = tk.Frame(control_frame)
-        btn_frame.pack(fill=tk.X)
-
-        tk.Button(
-            btn_frame,
-            text="⏸️ Pause",
-            command=self.pause_slam,
-            width=12
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            btn_frame,
-            text="▶️ Resume",
-            command=self.resume_slam,
-            width=12
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            btn_frame,
-            text="🔄 Reset",
-            command=self.reset_slam,
-            width=12
-        ).pack(side=tk.LEFT, padx=5)
-
-        # Save controls
-        save_frame = tk.Frame(control_frame)
-        save_frame.pack(fill=tk.X, pady=10)
-
-        tk.Button(
-            save_frame,
-            text="💾 Save PLY",
-            command=self.save_ply,
-            width=12
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            save_frame,
-            text="📸 Save Keyframes",
-            command=self.save_keyframes,
-            width=12
-        ).pack(side=tk.LEFT, padx=5)
-
-        # ===== SETTINGS =====
-        settings_frame = tk.LabelFrame(self.root, text="Settings", padx=10, pady=10)
-        settings_frame.pack(fill=tk.X, padx=10, pady=10)
-
-        # Subsample
-        subsample_frame = tk.Frame(settings_frame)
-        subsample_frame.pack(fill=tk.X, pady=5)
-
-        tk.Label(subsample_frame, text="Subsample:").pack(side=tk.LEFT)
-        self.subsample_var = tk.IntVar(value=2)
-        subsample_spin = tk.Spinbox(
-            subsample_frame,
-            from_=1,
-            to=10,
-            textvariable=self.subsample_var,
-            width=10
+        self.console_text = scrolledtext.ScrolledText(
+            console_frame,
+            height=15,
+            bg="black",
+            fg="#00ff00",
+            font=("Courier", 9),
+            wrap=tk.WORD
         )
-        subsample_spin.pack(side=tk.LEFT, padx=5)
+        self.console_text.pack(fill=tk.BOTH, expand=True)
 
-        # Confidence threshold
-        conf_frame = tk.Frame(settings_frame)
-        conf_frame.pack(fill=tk.X, pady=5)
-
-        tk.Label(conf_frame, text="Confidence Threshold:").pack(side=tk.LEFT)
-        self.conf_var = tk.DoubleVar(value=0.5)
-        conf_spin = tk.Spinbox(
-            conf_frame,
-            from_=0.0,
-            to=1.0,
-            increment=0.1,
-            textvariable=self.conf_var,
-            width=10
-        )
-        conf_spin.pack(side=tk.LEFT, padx=5)
+        # Clear console button
+        tk.Button(
+            console_frame,
+            text="🗑️ Clear Console",
+            command=lambda: self.console_text.delete(1.0, tk.END)
+        ).pack(pady=5)
 
     def build_ndi_options(self):
         """Build NDI source selection UI"""
@@ -414,119 +385,236 @@ class SLAMControlGUI:
             self.folder_path.insert(0, folder)
 
     def apply_source(self):
-        """Apply selected source to SLAM"""
+        """Launch SLAM with selected source"""
         source_type = self.source_type.get()
 
-        command = {
-            "action": "change_source",
-            "type": source_type,
-            "subsample": self.subsample_var.get(),
-            "conf_threshold": self.conf_var.get()
-        }
+        # Stop any existing process first
+        if self.slam_process is not None:
+            if messagebox.askyesno("Stop Current Process",
+                                  "SLAM is already running. Stop and restart?"):
+                self.stop_process()
+                time.sleep(0.5)  # Brief pause for cleanup
+            else:
+                return
 
-        if source_type == "NDI":
-            # Get selected or manual entry
+        # Build command based on source type
+        cmd = self.build_slam_command(source_type)
+
+        if cmd is None:
+            messagebox.showerror("Invalid Configuration",
+                               "Could not build SLAM command. Check your settings.")
+            return
+
+        # Launch process
+        self.launch_process(cmd)
+
+    def build_slam_command(self, source_type):
+        """Build SLAM command based on source type"""
+        # Base command with conda activation
+        base_cmd = [
+            "bash", "-c",
+            "source /home/sep/miniconda3/etc/profile.d/conda.sh && "
+            "conda activate mast3r-slam-blackwell && "
+        ]
+
+        if source_type == "TUM Dataset":
+            dataset_path = self.dataset_path.get().strip()
+            if not dataset_path:
+                messagebox.showerror("Error", "Please specify dataset path")
+                return None
+
+            cmd = base_cmd[2] + f"python main.py --dataset {dataset_path} --config config/calib.yaml"
+            self.source_var.set(f"Source: TUM Dataset ({Path(dataset_path).name})")
+
+        elif source_type == "NDI":
+            # Get NDI source
             selection = self.ndi_listbox.curselection()
             if selection:
-                command["source"] = self.ndi_listbox.get(selection[0])
+                ndi_source = self.ndi_listbox.get(selection[0])
             else:
-                command["source"] = self.ndi_manual_entry.get()
+                ndi_source = self.ndi_manual_entry.get().strip()
+
+            if not ndi_source:
+                messagebox.showerror("Error", "Please select or enter NDI source")
+                return None
+
+            cmd = base_cmd[2] + f"python main_live.py --source ndi --ndi-name \"{ndi_source}\" --config config/calib.yaml"
+            self.source_var.set(f"Source: NDI ({ndi_source})")
 
         elif source_type == "Webcam":
-            command["device_id"] = int(self.webcam_id.get())
-            command["width"] = int(self.webcam_width.get())
-            command["height"] = int(self.webcam_height.get())
+            device_id = self.webcam_id.get()
+            width = self.webcam_width.get()
+            height = self.webcam_height.get()
 
-        elif source_type == "TUM Dataset":
-            command["path"] = self.dataset_path.get()
-
-        elif source_type == "Video File":
-            command["path"] = self.video_path.get()
+            cmd = base_cmd[2] + f"python main_live.py --source webcam --device-id {device_id} --width {width} --height {height} --config config/calib.yaml"
+            self.source_var.set(f"Source: Webcam (Device {device_id})")
 
         elif source_type == "Image Folder":
-            command["path"] = self.folder_path.get()
+            folder_path = self.folder_path.get().strip()
+            if not folder_path:
+                messagebox.showerror("Error", "Please specify folder path")
+                return None
 
-        self.send_command(command)
-        self.status_var.set(f"Switching to {source_type}...")
+            cmd = base_cmd[2] + f"python main_live.py --source folder --watch-path \"{folder_path}\" --config config/calib.yaml"
+            self.source_var.set(f"Source: Folder Watch ({folder_path})")
 
-    def pause_slam(self):
-        """Pause SLAM processing"""
-        self.send_command({"action": "pause"})
-        self.status_var.set("Paused")
+        elif source_type == "RealSense":
+            cmd = base_cmd[2] + "python main_live.py --source realsense --config config/calib.yaml"
+            self.source_var.set("Source: RealSense")
 
-    def resume_slam(self):
-        """Resume SLAM processing"""
-        self.send_command({"action": "resume"})
-        self.status_var.set("Running")
+        elif source_type == "Video File":
+            video_path = self.video_path.get().strip()
+            if not video_path:
+                messagebox.showerror("Error", "Please specify video file")
+                return None
 
-    def reset_slam(self):
-        """Reset SLAM (clear map)"""
-        if messagebox.askyesno("Reset SLAM", "Clear all keyframes and restart?"):
-            self.send_command({"action": "reset"})
-            self.status_var.set("Reset")
-            self.keyframes_var.set("Keyframes: 0")
+            cmd = base_cmd[2] + f"python main_live.py --source rtsp --rtsp-url \"{video_path}\" --config config/calib.yaml"
+            self.source_var.set(f"Source: Video ({Path(video_path).name})")
 
-    def save_ply(self):
-        """Save current reconstruction as PLY"""
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".ply",
-            filetypes=[("PLY files", "*.ply"), ("All files", "*.*")]
-        )
-        if filename:
-            self.send_command({"action": "save_ply", "path": filename})
-            messagebox.showinfo("Save", f"Saving reconstruction to:\n{filename}")
+        else:
+            return None
 
-    def save_keyframes(self):
-        """Save keyframe images"""
-        folder = filedialog.askdirectory()
-        if folder:
-            self.send_command({"action": "save_keyframes", "path": folder})
-            messagebox.showinfo("Save", f"Saving keyframes to:\n{folder}")
+        return ["bash", "-c", cmd]
 
-    def send_command(self, command):
-        """Send command to SLAM process via socket"""
-        try:
-            # Send via UDP socket to localhost:9999
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            msg = json.dumps(command).encode('utf-8')
-            sock.sendto(msg, ('127.0.0.1', 9999))
-            sock.close()
-            print(f"Sent command: {command}")
-        except Exception as e:
-            print(f"Failed to send command: {e}")
-
-    def update_status(self):
-        """Update status from SLAM process"""
-        # Listen for status updates on port 10000
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind(('127.0.0.1', 10000))
-        sock.settimeout(1.0)
-
-        while self.running:
+    def launch_process(self, cmd):
+        """Launch SLAM process"""
+        with self.process_lock:
             try:
-                data, addr = sock.recvfrom(4096)
-                status = json.loads(data.decode('utf-8'))
+                self.log_console(f"Launching SLAM: {' '.join(cmd[2].split()[-5:])}\n")
+
+                self.slam_process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    cwd="/home/sep/MASt3R-SLAM"
+                )
 
                 # Update UI
-                self.root.after(0, lambda: self.update_ui_status(status))
+                self.status_var.set("SLAM Running")
+                self.pid_var.set(f"PID: {self.slam_process.pid}")
+                self.stop_btn.config(state=tk.NORMAL)
+                self.restart_btn.config(state=tk.NORMAL)
+                self.launch_btn.config(state=tk.DISABLED)
 
-            except socket.timeout:
-                continue
+                self.log_console(f"Process started (PID: {self.slam_process.pid})\n")
+
+                # Start output reader thread
+                output_thread = threading.Thread(
+                    target=self.read_process_output,
+                    daemon=True
+                )
+                output_thread.start()
+
             except Exception as e:
-                print(f"Status update error: {e}")
+                self.log_console(f"ERROR: Failed to launch process: {e}\n")
+                messagebox.showerror("Launch Failed", f"Could not start SLAM:\n{e}")
 
-        sock.close()
+    def stop_process(self):
+        """Stop running SLAM process"""
+        with self.process_lock:
+            if self.slam_process is None:
+                return
 
-    def update_ui_status(self, status):
-        """Update UI with status info"""
-        if "fps" in status:
-            self.fps_var.set(f"FPS: {status['fps']:.1f}")
-        if "keyframes" in status:
-            self.keyframes_var.set(f"Keyframes: {status['keyframes']}")
-        if "source" in status:
-            self.source_var.set(f"Source: {status['source']}")
-        if "status" in status:
-            self.status_var.set(status['status'])
+            try:
+                self.log_console("\nStopping SLAM process...\n")
+
+                # Try graceful termination first
+                self.slam_process.terminate()
+
+                # Wait up to 5 seconds
+                try:
+                    self.slam_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Force kill if still running
+                    self.log_console("Process not responding, force killing...\n")
+                    self.slam_process.kill()
+                    self.slam_process.wait()
+
+                self.log_console("Process stopped.\n")
+
+            except Exception as e:
+                self.log_console(f"Error stopping process: {e}\n")
+
+            finally:
+                self.slam_process = None
+                self.status_var.set("No process running")
+                self.pid_var.set("PID: None")
+                self.stop_btn.config(state=tk.DISABLED)
+                self.restart_btn.config(state=tk.DISABLED)
+                self.launch_btn.config(state=tk.NORMAL)
+
+    def restart_process(self):
+        """Restart SLAM with same settings"""
+        source_type = self.source_type.get()
+        self.stop_process()
+        time.sleep(0.5)
+        self.apply_source()
+
+    def read_process_output(self):
+        """Read and display process output"""
+        if self.slam_process is None:
+            return
+
+        try:
+            for line in iter(self.slam_process.stdout.readline, ''):
+                if not line:
+                    break
+
+                # Log to console
+                self.root.after(0, lambda l=line: self.log_console(l))
+
+                # Parse for FPS and keyframe count
+                self.root.after(0, lambda l=line: self.parse_output_line(l))
+
+            # Process ended
+            return_code = self.slam_process.wait()
+            self.root.after(0, lambda: self.on_process_ended(return_code))
+
+        except Exception as e:
+            self.root.after(0, lambda: self.log_console(f"\nOutput reader error: {e}\n"))
+
+    def parse_output_line(self, line):
+        """Extract FPS and other info from output"""
+        # Look for FPS patterns like "FPS: 12.3" or "12.3 fps"
+        fps_match = re.search(r'(\d+\.\d+)\s*fps|FPS:\s*(\d+\.\d+)', line, re.IGNORECASE)
+        if fps_match:
+            fps = fps_match.group(1) or fps_match.group(2)
+            self.fps_var.set(f"FPS: {fps}")
+
+        # Look for keyframe count
+        kf_match = re.search(r'keyframes?:\s*(\d+)', line, re.IGNORECASE)
+        if kf_match:
+            self.keyframes_var.set(f"Keyframes: {kf_match.group(1)}")
+
+    def log_console(self, text):
+        """Add text to console output"""
+        self.console_text.insert(tk.END, text)
+        self.console_text.see(tk.END)
+
+    def on_process_ended(self, return_code):
+        """Handle process termination"""
+        self.log_console(f"\n=== Process ended (exit code: {return_code}) ===\n")
+        self.slam_process = None
+        self.status_var.set(f"Process ended (exit: {return_code})")
+        self.pid_var.set("PID: None")
+        self.stop_btn.config(state=tk.DISABLED)
+        self.restart_btn.config(state=tk.DISABLED)
+        self.launch_btn.config(state=tk.NORMAL)
+
+    def monitor_process_output(self):
+        """Background thread to check process status"""
+        while self.running:
+            time.sleep(1.0)
+
+            with self.process_lock:
+                if self.slam_process is not None:
+                    poll_result = self.slam_process.poll()
+                    if poll_result is not None:
+                        # Process died unexpectedly
+                        self.root.after(0, lambda: self.on_process_ended(poll_result))
 
     def run(self):
         """Start the GUI"""
@@ -535,13 +623,34 @@ class SLAMControlGUI:
 
     def on_close(self):
         """Handle window close"""
+        # Stop any running process
+        if self.slam_process is not None:
+            if messagebox.askyesno("Stop Process",
+                                  "SLAM is still running. Stop and exit?"):
+                self.stop_process()
+            else:
+                return
+
         self.running = False
         self.root.destroy()
 
 
 if __name__ == "__main__":
-    print("Starting MASt3R-SLAM Control GUI...")
-    print("This control panel communicates with SLAM via UDP ports 9999/10000")
+    print("=" * 60)
+    print("MASt3R-SLAM Process Launcher")
+    print("=" * 60)
+    print()
+    print("This GUI allows you to launch MASt3R-SLAM with different")
+    print("camera sources and view live console output.")
+    print()
+    print("Features:")
+    print("  - Launch with TUM datasets, NDI, webcam, image folders")
+    print("  - View real-time console output")
+    print("  - Stop/restart processes easily")
+    print("  - Monitor FPS and keyframe count")
+    print()
+    print("=" * 60)
+    print()
 
     gui = SLAMControlGUI()
     gui.run()
