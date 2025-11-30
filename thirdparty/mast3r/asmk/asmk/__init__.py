@@ -4,3 +4,6 @@ for instance-level recognition"
 """
 
 from .asmk_method import ASMKMethod
+from .asmk_method import ASMKMethod as ASMKSolver
+ASMKSolver = ASMKMethod
+from .asmk_method import ASMKMethod as ASMKSolver
